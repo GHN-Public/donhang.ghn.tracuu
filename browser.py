@@ -1,36 +1,32 @@
+import os
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-PROFILE = Path("chrome_profile")
-
 URL = "https://nhanh.ghn.vn/lastmile/report/backlog-lgt"
 
-with sync_playwright() as p:
-
-context = p.chromium.launch_persistent_context(
-    user_data_dir=str(PROFILE),
-    channel="chrome",
-    headless=False,
-    viewport=None,
-    args=[
-        "--start-maximized"
-    ]
-)
-
-    pages = context.pages
-
-    if pages:
-        page = pages[0]
-    else:
+def run_browser():
+    with sync_playwright() as p:
+        # Khởi chạy Chromium headless hoàn toàn phù hợp với môi trường Linux Render
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--single-process"
+            ]
+        )
+        context = browser.new_context()
         page = context.new_page()
+        
+        try:
+            page.goto(URL, timeout=60000)
+            page.wait_for_load_state("networkidle")
+            print("Da mo Dashboard thanh cong!")
+        except Exception as e:
+            print(f"Loi truy cap URL: {e}")
+            
+        browser.close()
 
-    if "nhanh.ghn.vn" not in page.url:
-        page.goto(URL)
-
-    page.wait_for_load_state("networkidle")
-
-    print("Đã mở Dashboard")
-
-    input("Nhấn Enter để kết thúc...")
-
-    context.close()
+if __name__ == "__main__":
+    run_browser()
