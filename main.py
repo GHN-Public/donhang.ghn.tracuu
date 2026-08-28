@@ -24,19 +24,23 @@ def handle_update(update):
             chat_id = message["chat"]["id"]
             text = message.get("text", "").strip()
 
-            if text in ["/start"]:
-                reply = "👋 Chào mừng bạn! Các lệnh hỗ trợ:\n- /menu: Xem menu phản hồi nhanh\n- /report: Lấy báo cáo GHN"
+            # Nhận lệnh /start hoặc /help
+            if text in ["/start", "/help"]:
+                reply = "👋 Chào mừng bạn! Gửi mã đơn hàng GHN hoặc dùng lệnh /report để lấy báo cáo."
                 send_telegram_message(chat_id, reply)
 
+            # Nhận lệnh /menu
             elif text in ["/menu", "menu"]:
-                # Phản hồi ngay lập tức không thông qua Playwright
                 reply = "📋 **MENU TRA CỨU GHN**\n\n1. Gõ `/report` để tải báo cáo Backlog.\n2. Gửi mã đơn hàng để tra cứu trực tiếp."
                 send_telegram_message(chat_id, reply)
 
-            elif text in ["/report"]:
-                send_telegram_message(chat_id, "⏳ Đang kết nối GHN để lấy dữ liệu, vui lòng đợi...")
-                # Truyền chat_id vào để report_bot tự gửi kết quả về
-                report_bot.run_report(chat_id)
+            # Xử lý tất cả các dạng lệnh báo cáo (/report, /report@ghn_kpi_bot, ...)
+            elif text.startswith("/report"):
+                send_telegram_message(chat_id, "⏳ Đang kết nối GHN để lấy dữ liệu, vui lòng đợi trong giây lát...")
+                
+                # Chạy Playwright trong Thread riêng để tránh làm nghẽn Telegram
+                thread = threading.Thread(target=report_bot.run_report, args=(chat_id,))
+                thread.start()
 
             else:
                 send_telegram_message(chat_id, f"🔍 Đã nhận yêu cầu: {text}. Tính năng đang cập nhật.")
@@ -58,7 +62,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             update = json.loads(post_data.decode('utf-8'))
             threading.Thread(target=handle_update, args=(update,)).start()
         except Exception as e:
-            print(f"Loi Webhook: {e}")
+            print(f"Lỗi parse webhook: {e}")
 
         self.send_response(200)
         self.end_headers()
