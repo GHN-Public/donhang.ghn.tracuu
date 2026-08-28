@@ -1,12 +1,13 @@
 import os
 import requests
+from playwright.sync_api import sync_playwright
+
+LOGIN_URL = "https://sso.ghn.vn/sso/login"
+REPORT_URL = "https://nhanh.ghn.vn/lastmile/report/backlog-lgt"
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GHN_USER = os.getenv("GHN_USERNAME")
 GHN_PASS = os.getenv("GHN_PASSWORD")
-
-LOGIN_API = "https://sso.ghn.vn/api/v1/auth/login"
-REPORT_API = "https://nhanh.ghn.vn/api/v1/lastmile/report/backlog-lgt"
 
 def send_message(chat_id, text):
     if not BOT_TOKEN:
@@ -19,45 +20,55 @@ def send_message(chat_id, text):
 
 def run_report(chat_id):
     if not GHN_USER or not GHN_PASS:
-        send_message(chat_id, "❌ Chưa cấu hình GHN_USERNAME hoặc GHN_PASSWORD trên Render!")
+        send_message(chat_id, "❌ Chưa cấu hình GHN_USERNAME hoặc GHN_PASSWORD trên Render Environment!")
         return
 
-    session = requests.Session()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Content-Type": "application/json"
-    }
+    with sync_playwright() as p:
+        # Giả lập trình duyệt chuẩn để vượt qua rào cản 403
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled"
+            ]
+        )
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
 
-    try:
-        # 1. Đăng nhập qua API SSO GHN
-        login_payload = {
-            "username": GHN_USER,
-            "password": GHN_PASS
-        }
-        login_res = session.post(LOGIN_API, json=login_payload, headers=headers, timeout=15)
-        
-        if login_res.status_code != 200:
-            send_message(chat_id, f"❌ Đăng nhập GHN thất bại! Mã lỗi: {login_res.status_code}\nVui lòng kiểm tra lại tài khoản/mật khẩu.")
-            return
+        try:
+            # 1. Mở trang đăng nhập SSO GHN
+            page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=25000)
+            page.wait_for_timeout(2000)
 
-        login_data = login_res.json()
-        token = login_data.get("data", {}).get("token") or login_data.get("token")
+            # 2. Tìm và điền ô tài khoản/mật khẩu
+            inputs = page.query_selector_all("input")
+            if len(inputs) >= 2:
+                inputs[0].fill(GHN_USER)
+                inputs[1].fill(GHN_PASS)
+            else:
+                page.fill("input[type='text'], input[name*='user'], input[placeholder*='Điện thoại']", GHN_USER)
+                page.fill("input[type='password'], input[name*='pass']", GHN_PASS)
 
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+            # Click Đăng nhập
+            page.click("button[type='submit'], button:has-text('Đăng nhập')")
+            page.wait_for_timeout(4000)
 
-        # 2. Gọi API lấy báo cáo Backlog
-        report_res = session.get(REPORT_API, headers=headers, timeout=15)
-        
-        if report_res.status_code == 200:
-            res_data = report_res.json()
-            # Trích xuất dữ liệu trả về từ API
-            msg = f"📊 **BÁO CÁO BACKLOG GHN**\n\n"
-            msg += f"✅ Lấy dữ liệu thành công!\n"
-            msg += f"Dữ liệu phản hồi: {str(res_data)[:800]}"
-            send_message(chat_id, msg)
-        else:
-            send_message(chat_id, f"⚠️ Đã đăng nhập nhưng không thể lấy báo cáo Backlog (HTTP {report_res.status_code}).")
+            # 3. Điều hướng tới trang báo cáo Backlog
+            page.goto(REPORT_URL, wait_until="domcontentloaded", timeout=25000)
+            page.wait_for_timeout(3000)
 
-    except Exception as e:
-        send_message(chat_id, f"❌ Lỗi kết nối hệ thống GHN: {e}")
+            title = page.title()
+            body_text = page.inner_text("body")
+            summary_text = body_text[:800] if body_text else "Không lấy được nội dung."
+
+            send_message(chat_id, f"📊 **BÁO CÁO BACKLOG GHN**\n\n📌 Trang: {title}\n\n📝 Nội dung:\n{summary_text}")
+
+        except Exception as e:
+            send_message(chat_id, f"❌ Lỗi xử lý: {e}")
+            
+        finally:
+            browser.close()
