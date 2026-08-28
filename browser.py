@@ -7,15 +7,15 @@ URL = "https://nhanh.ghn.vn/lastmile/report/backlog-lgt"
 
 with sync_playwright() as p:
 
-    context = p.chromium.launch_persistent_context(
-        user_data_dir=str(PROFILE),
-        channel="chrome",
-        headless=False,
-        viewport=None,
-        args=[
-            "--start-maximized"
-        ]
-    )
+context = p.chromium.launch_persistent_context(
+    user_data_dir=str(PROFILE),
+    channel="chrome",
+    headless=False,
+    viewport=None,
+    args=[
+        "--start-maximized"
+    ]
+)
 
     pages = context.pages
 
