@@ -3,12 +3,13 @@ import json
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
+import report_bot
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 def send_telegram_message(chat_id, text):
     if not BOT_TOKEN:
-        print("Lỗi: Chưa cài đặt TELEGRAM_BOT_TOKEN trong Environment Variables!")
+        print("Loi: Chưa cài đặt TELEGRAM_BOT_TOKEN trong Environment Variables!")
         return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text}
@@ -22,14 +23,23 @@ def handle_update(update):
         if "message" in update:
             message = update["message"]
             chat_id = message["chat"]["id"]
-            text = message.get("text", "")
+            text = message.get("text", "").strip()
 
-            if text in ["/start", "/menu", "menu"]:
-                reply = "Chào bạn! Bot Tra Cứu GHN đã sẵn sàng hoạt động trên Render 24/7."
+            if text in ["/start"]:
+                reply = "Chào bạn! Bot Tra Cứu GHN đã sẵn sàng. Hãy gõ /menu hoặc gửi mã đơn hàng để tra cứu."
+                send_telegram_message(chat_id, reply)
+
+            elif text in ["/report", "/menu", "menu"]:
+                send_telegram_message(chat_id, "⏳ Đang kết nối hệ thống GHN để lấy dữ liệu, vui lòng đợi trong giây lát...")
+                
+                # Gọi hàm cào dữ liệu từ report_bot.py
+                report_bot.run_report()
+                
+                send_telegram_message(chat_id, "✅ Đã tải và cập nhật xong báo cáo Dashboard GHN!")
+
             else:
-                reply = f"Đã nhận câu lệnh: {text}. Đang xử lý dữ liệu..."
+                send_telegram_message(chat_id, f"Đã nhận mã/câu lệnh: {text}. Đang xử lý tra cứu...")
 
-            send_telegram_message(chat_id, reply)
     except Exception as e:
         print(f"Loi xu ly update: {e}")
 
@@ -46,7 +56,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         try:
             update = json.loads(post_data.decode('utf-8'))
-            # Xu ly tin nhắn trong luong rieng de phan hoi Webhook ngay lap tuc cho Telegram
+            # Xử lý tin nhắn trong luồng riêng để phản hồi Webhook ngay lập tức cho Telegram
             threading.Thread(target=handle_update, args=(update,)).start()
         except Exception as e:
             print(f"Loi xu ly Webhook: {e}")
