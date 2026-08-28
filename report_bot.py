@@ -4,26 +4,26 @@ URL = "https://nhanh.ghn.vn/lastmile/report/backlog-lgt"
 
 def run_report():
     with sync_playwright() as p:
-        # Khởi tạo Chromium headless tương thích hoàn toàn với môi trường Render Linux
         browser = p.chromium.launch(
             headless=True,
             args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
-                "--single-process"
+                "--blink-settings=imagesEnabled=false"  # Tắt tải ảnh để tăng tốc
             ]
         )
         context = browser.new_context()
-        page = context.new_page()
         
+        # Chặn tải các tài nguyên nặng như ảnh, CSS, media
+        page = context.new_page()
+        page.route("**/*.{png,jpg,jpeg,svg,gif,css,woff,woff2}", lambda route: route.abort())
+
         try:
-            page.goto(URL, wait_until="networkidle", timeout=60000)
-            print("Da mo:", page.title())
+            # Chờ DOM sẵn sàng thay vì chờ networkidle (tiết kiệm 5-10 giây)
+            page.goto(URL, wait_until="domcontentloaded", timeout=30000)
+            print("Đã tải xong trang:", page.title())
         except Exception as e:
-            print(f"Loi khi mo trang: {e}")
+            print(f"Lỗi khi cào dữ liệu: {e}")
             
         browser.close()
-
-if __name__ == "__main__":
-    run_report()
