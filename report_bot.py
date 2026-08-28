@@ -1,13 +1,12 @@
 import os
 import requests
-from playwright.sync_api import sync_playwright
-
-LOGIN_URL = "https://sso.ghn.vn/sso/login"
-REPORT_URL = "https://nhanh.ghn.vn/lastmile/report/backlog-lgt"
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GHN_USER = os.getenv("GHN_USERNAME")
 GHN_PASS = os.getenv("GHN_PASSWORD")
+
+LOGIN_API = "https://sso.ghn.vn/api/v1/auth/login"
+REPORT_API = "https://nhanh.ghn.vn/api/v1/lastmile/report/backlog-lgt"
 
 def send_message(chat_id, text):
     if not BOT_TOKEN:
@@ -20,44 +19,45 @@ def send_message(chat_id, text):
 
 def run_report(chat_id):
     if not GHN_USER or not GHN_PASS:
-        send_message(chat_id, "❌ Lỗi: Chưa cài đặt GHN_USERNAME hoặc GHN_PASSWORD trên Render Environment!")
+        send_message(chat_id, "❌ Chưa cấu hình GHN_USERNAME hoặc GHN_PASSWORD trên Render!")
         return
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
-        )
-        context = browser.new_context()
-        page = context.new_page()
+    session = requests.Session()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Content-Type": "application/json"
+    }
 
-        try:
-            # 1. Mở trang Đăng nhập GHN SSO
-            page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(2000)
+    try:
+        # 1. Đăng nhập qua API SSO GHN
+        login_payload = {
+            "username": GHN_USER,
+            "password": GHN_PASS
+        }
+        login_res = session.post(LOGIN_API, json=login_payload, headers=headers, timeout=15)
+        
+        if login_res.status_code != 200:
+            send_message(chat_id, f"❌ Đăng nhập GHN thất bại! Mã lỗi: {login_res.status_code}\nVui lòng kiểm tra lại tài khoản/mật khẩu.")
+            return
 
-            # 2. Điền tài khoản & mật khẩu
-            page.fill("input[name='username'], input[type='text']", GHN_USER)
-            page.fill("input[name='password'], input[type='password']", GHN_PASS)
-            
-            # Click Đăng nhập và chờ xử lý
-            page.click("button[type='submit'], button:has-text('Đăng nhập')")
-            page.wait_for_timeout(4000)
+        login_data = login_res.json()
+        token = login_data.get("data", {}).get("token") or login_data.get("token")
 
-            # 3. Chuyển sang trang báo cáo Backlog
-            page.goto(REPORT_URL, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(3000)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
 
-            title = page.title()
-            body_text = page.inner_text("body")
-            
-            # Cắt ngắn văn bản thu thập được để gửi lên Telegram
-            summary_text = body_text[:1000] if body_text else "Không lấy được nội dung."
+        # 2. Gọi API lấy báo cáo Backlog
+        report_res = session.get(REPORT_API, headers=headers, timeout=15)
+        
+        if report_res.status_code == 200:
+            res_data = report_res.json()
+            # Trích xuất dữ liệu trả về từ API
+            msg = f"📊 **BÁO CÁO BACKLOG GHN**\n\n"
+            msg += f"✅ Lấy dữ liệu thành công!\n"
+            msg += f"Dữ liệu phản hồi: {str(res_data)[:800]}"
+            send_message(chat_id, msg)
+        else:
+            send_message(chat_id, f"⚠️ Đã đăng nhập nhưng không thể lấy báo cáo Backlog (HTTP {report_res.status_code}).")
 
-            send_message(chat_id, f"📊 **BÁO CÁO BACKLOG GHN**\n\n📌 Trang: {title}\n\n📝 Nội dung:\n{summary_text}")
-
-        except Exception as e:
-            send_message(chat_id, f"❌ Lỗi khi đăng nhập hoặc lấy dữ liệu GHN: {e}")
-            
-        finally:
-            browser.close()
+    except Exception as e:
+        send_message(chat_id, f"❌ Lỗi kết nối hệ thống GHN: {e}")
